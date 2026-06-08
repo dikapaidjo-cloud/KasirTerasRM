@@ -1,0 +1,16 @@
+services:
+  teras-rm-pos:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_PATH=/app/data/teras-rm.sqlite
+      - REPORTS_DIR=/app/reports
+    volumes:
+      - ./server/database:/app/data
+      - ./reports:/app/reports
+      - ./backups:/app/backups
+      - ./uploads:/app/uploads
+    restart: unless-stopped
