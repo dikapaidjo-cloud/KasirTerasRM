@@ -6,6 +6,7 @@ import { formatMoney, sizeLabel } from '../utils/money.js';
 
 export default function CartPanel({ onSaved }) {
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
   const cartItems = usePosStore((state) => state.cartItems);
   const updateQty = usePosStore((state) => state.updateQty);
   const removeFromCart = usePosStore((state) => state.removeFromCart);
@@ -29,7 +30,9 @@ export default function CartPanel({ onSaved }) {
 
   async function saveTransaction(printAfterSave = false) {
     if (!cartItems.length || saving) return;
+    const receiptWindow = printAfterSave ? openReceiptWindow() : null;
     setSaving(true);
+    setError('');
     try {
       const transaction = await api.transactions.create({
         items: cartItems,
@@ -38,20 +41,27 @@ export default function CartPanel({ onSaved }) {
         discount_value: discountValue,
         notes
       });
-      if (printAfterSave) await printReceipt(transaction);
+      if (printAfterSave) printReceipt(transaction, receiptWindow);
       resetCart();
       onSaved?.();
+    } catch (error) {
+      receiptWindow?.close();
+      setError(error.message || 'Transaksi gagal disimpan. Silakan coba lagi.');
     } finally {
       setSaving(false);
     }
   }
 
-  async function printReceipt(transaction) {
+  function openReceiptWindow() {
+    return window.open('', 'receipt', 'width=320,height=600');
+  }
+
+  function printReceipt(transaction, receiptWindow) {
     const text = buildReceipt(transaction);
     if ('bluetooth' in navigator) {
       alert('Struk siap. Hubungkan printer thermal via fitur Bluetooth browser jika perangkat mendukung.');
     }
-    const win = window.open('', 'receipt', 'width=320,height=600');
+    const win = receiptWindow || openReceiptWindow();
     if (win) {
       win.document.write(`
         <!doctype html>
@@ -89,6 +99,8 @@ export default function CartPanel({ onSaved }) {
       `);
       win.document.close();
       win.addEventListener('load', () => win.print(), { once: true });
+    } else {
+      setError('Transaksi tersimpan, tetapi jendela print diblokir browser.');
     }
   }
 
@@ -146,6 +158,11 @@ export default function CartPanel({ onSaved }) {
           <Row label="Diskon" value={totals.discount} />
           <Row label="Total" value={totals.total} strong />
         </div>
+        {error && (
+          <p className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
+            {error}
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-2">
           <button className="touch-btn rounded bg-leaf px-3 font-bold text-white disabled:opacity-50" disabled={!cartItems.length || saving} onClick={() => saveTransaction(false)}>
             Simpan

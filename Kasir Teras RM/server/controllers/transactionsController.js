@@ -26,39 +26,44 @@ export function createTransaction(req, res) {
     : Math.min(discountValue, subtotal);
   const total = Math.max(subtotal - discountAmount, 0);
 
-  const insert = db.transaction(() => {
-    const invoice = createInvoiceNumber();
-    const transaction = db.prepare(`
-      INSERT INTO transactions (
-        invoice_number, payment_method, subtotal, discount_type,
-        discount_value, discount_amount, total, notes
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(invoice, paymentMethod, subtotal, discountType, discountValue, discountAmount, total, req.body.notes || '');
+  try {
+    const insert = db.transaction(() => {
+      const invoice = createInvoiceNumber();
+      const transaction = db.prepare(`
+        INSERT INTO transactions (
+          invoice_number, payment_method, subtotal, discount_type,
+          discount_value, discount_amount, total, notes
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(invoice, paymentMethod, subtotal, discountType, discountValue, discountAmount, total, req.body.notes || '');
 
-    const insertItem = db.prepare(`
-      INSERT INTO transaction_items (transaction_id, menu_id, menu_name, size, qty, price, total)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
+      const insertItem = db.prepare(`
+        INSERT INTO transaction_items (transaction_id, menu_id, menu_name, size, qty, price, total)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
 
-    items.forEach((item) => {
-      const qty = Math.max(Number(item.qty) || 1, 1);
-      const price = Math.max(Number(item.price) || 0, 0);
-      insertItem.run(
-        transaction.lastInsertRowid,
-        item.menu_id || item.id || null,
-        item.menu_name || item.name,
-        item.size || 'regular',
-        qty,
-        price,
-        qty * price
-      );
+      items.forEach((item) => {
+        const qty = Math.max(Number(item.qty) || 1, 1);
+        const price = Math.max(Number(item.price) || 0, 0);
+        insertItem.run(
+          transaction.lastInsertRowid,
+          item.menu_id || item.id || null,
+          item.menu_name || item.name,
+          item.size || 'regular',
+          qty,
+          price,
+          qty * price
+        );
+      });
+
+      return getTransaction(transaction.lastInsertRowid);
     });
 
-    return getTransaction(transaction.lastInsertRowid);
-  });
-
-  res.status(201).json(insert());
+    res.status(201).json(insert());
+  } catch (error) {
+    console.error('Failed to create transaction', error);
+    res.status(500).json({ message: 'Transaksi gagal disimpan. Silakan coba lagi.' });
+  }
 }
 
 export function deleteTransaction(req, res) {
@@ -68,13 +73,22 @@ export function deleteTransaction(req, res) {
 
 function createInvoiceNumber() {
   const date = new Date();
-  const stamp = date.toISOString().slice(0, 10).replaceAll('-', '');
-  const count = db.prepare(`
-    SELECT COUNT(*) AS total
+  const stamp = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0')
+  ].join('');
+  const latest = db.prepare(`
+    SELECT invoice_number
     FROM transactions
-    WHERE date(created_at) = date('now', 'localtime')
-  `).get().total + 1;
-  return `TRM-${stamp}-${String(count).padStart(4, '0')}`;
+    WHERE invoice_number LIKE ?
+    ORDER BY invoice_number DESC
+    LIMIT 1
+  `).get(`TRM-${stamp}-%`);
+  const sequence = latest?.invoice_number
+    ? Number(latest.invoice_number.split('-').at(-1)) + 1
+    : 1;
+  return `TRM-${stamp}-${String(sequence).padStart(4, '0')}`;
 }
 
 function getTransaction(id) {
